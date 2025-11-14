@@ -56,7 +56,7 @@ class LinkedInAPIClient:
         self.headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
-            "LinkedIn-Version": os.getenv("LINKEDIN_API_VERSION", "202405"),
+            "LinkedIn-Version": os.getenv("LINKEDIN_API_VERSION", "202510"),
             "X-Restli-Protocol-Version": "2.0.0",
         }
         self._person_urn = None
@@ -514,6 +514,42 @@ class LinkedInAPIClient:
             logger.error(f"Credential validation failed: {e}")
             return False
 
+    # ==================== POST READING (SCRAPING-BASED) ====================
+
+    @staticmethod
+    def extract_post_id_from_url(url: str) -> Optional[str]:
+        """
+        Extract post/activity ID from LinkedIn post URL.
+        
+        Supports multiple URL formats:
+        - https://www.linkedin.com/posts/username_activity-7394701839126016000-3V9W
+        - https://www.linkedin.com/feed/update/urn:li:activity:7394701839126016000
+        - https://www.linkedin.com/posts/aemal_llm-ai-promptengineering-activity-7394335719143555072-ye8K
+        
+        Args:
+            url: LinkedIn post URL
+            
+        Returns:
+            Post/activity ID or None if not found
+        """
+        import re
+        
+        # Remove URL parameters
+        url = url.split('?')[0]
+        
+        patterns = [
+            r'activity[:-](\d{19})',  # Most common: activity-7394701839126016000
+            r'share[:-](\d{19})',     # Share format
+            r'ugcPost[:-](\d{19})',   # UGC post format
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        
+        return None
+
 
 def register_post_tools(mcp: FastMCP) -> None:
     """Register all LinkedIn API tools with the MCP server."""
@@ -731,3 +767,198 @@ def register_post_tools(mcp: FastMCP) -> None:
                 }
         except Exception as e:
             return {"status": "error", "message": str(e)}
+
+    # ==================== POST READING TOOL ====================
+
+    @mcp.tool()
+    async def read_linkedin_post(post_url: str) -> Dict[str, Any]:
+        """
+        Read and extract details from any LinkedIn post by URL.
+        
+        Paste a LinkedIn post URL (from desktop or mobile) to extract:
+        - Post content/text
+        - Author information
+        - Engagement metrics (reactions, comments)
+        - Post date
+        - Images/media (if any)
+        
+        Works with both public posts and posts from your network.
+        Requires LINKEDIN_COOKIE environment variable for scraping.
+        
+        Args:
+            post_url: Full LinkedIn post URL
+                Examples:
+                - https://www.linkedin.com/posts/username_activity-7394701839126016000-3V9W
+                - https://www.linkedin.com/posts/aemal_llm-ai-activity-7394335719143555072-ye8K
+        
+        Returns:
+            Dict with post details including content, author, reactions, etc.
+        """
+        from linkedin_mcp_server.tools.person import scrape_linkedin_profile_url
+        
+        try:
+            # Extract post ID from URL
+            post_id = LinkedInAPIClient.extract_post_id_from_url(post_url)
+            
+            if not post_id:
+                return {
+                    "status": "error",
+                    "message": "Invalid LinkedIn post URL format. URL should contain 'activity-' followed by 19 digits.",
+                    "example": "https://www.linkedin.com/posts/username_activity-7394701839126016000-abcd"
+                }
+            
+            # Check if scraping is available
+            linkedin_cookie = os.getenv("LINKEDIN_COOKIE")
+            if not linkedin_cookie:
+                return {
+                    "status": "error",
+                    "message": "LINKEDIN_COOKIE environment variable required for reading posts",
+                    "note": "Set LINKEDIN_COOKIE=li_at=your_cookie_value in .env file",
+                    "extracted_post_id": post_id
+                }
+            
+            # Use the existing scraping infrastructure
+            try:
+                from linkedin_scraper import actions
+                from selenium import webdriver
+                from selenium.webdriver.common.by import By
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.support import expected_conditions as EC
+                import time
+                
+                # Setup Chrome driver
+                options = webdriver.ChromeOptions()
+                options.add_argument('--headless')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                options.add_experimental_option('useAutomationExtension', False)
+                
+                driver = webdriver.Chrome(options=options)
+                
+                try:
+                    # Login with cookie
+                    driver.get("https://www.linkedin.com")
+                    driver.add_cookie({
+                        'name': 'li_at',
+                        'value': linkedin_cookie.replace('li_at=', ''),
+                        'domain': '.linkedin.com'
+                    })
+                    
+                    # Navigate to post
+                    clean_url = post_url.split('?')[0]  # Remove URL parameters
+                    driver.get(clean_url)
+                    time.sleep(3)  # Wait for page load
+                    
+                    # Extract post data
+                    post_data = {
+                        "status": "success",
+                        "post_id": post_id,
+                        "url": clean_url,
+                        "data": {}
+                    }
+                    
+                    try:
+                        # Author name
+                        author_elem = driver.find_element(By.CSS_SELECTOR, ".update-components-actor__name, .feed-shared-actor__name")
+                        post_data["data"]["author"] = author_elem.text
+                    except:
+                        post_data["data"]["author"] = "Unknown"
+                    
+                    try:
+                        # Author title/headline
+                        title_elem = driver.find_element(By.CSS_SELECTOR, ".update-components-actor__description, .feed-shared-actor__description")
+                        post_data["data"]["author_title"] = title_elem.text
+                    except:
+                        post_data["data"]["author_title"] = ""
+                    
+                    try:
+                        # Post content/text
+                        content_elem = driver.find_element(By.CSS_SELECTOR, ".feed-shared-update-v2__description, .feed-shared-text, .break-words")
+                        post_data["data"]["content"] = content_elem.text
+                    except:
+                        try:
+                            # Alternative selector
+                            content_elem = driver.find_element(By.CSS_SELECTOR, "[dir='ltr'] .break-words")
+                            post_data["data"]["content"] = content_elem.text
+                        except:
+                            post_data["data"]["content"] = ""
+                    
+                    try:
+                        # Posted date/time
+                        date_elem = driver.find_element(By.CSS_SELECTOR, ".update-components-actor__sub-description, .feed-shared-actor__sub-description")
+                        post_data["data"]["posted_date"] = date_elem.text.split('•')[0].strip()
+                    except:
+                        post_data["data"]["posted_date"] = "Unknown"
+                    
+                    try:
+                        # Reaction count
+                        reactions_elem = driver.find_element(By.CSS_SELECTOR, ".social-details-social-counts__reactions-count, [aria-label*='reaction']")
+                        post_data["data"]["reactions"] = reactions_elem.text
+                    except:
+                        post_data["data"]["reactions"] = "0"
+                    
+                    try:
+                        # Comments count
+                        comments_elem = driver.find_element(By.CSS_SELECTOR, ".social-details-social-counts__comments, [aria-label*='comment']")
+                        comments_text = comments_elem.text
+                        post_data["data"]["comments"] = comments_text.split()[0] if comments_text else "0"
+                    except:
+                        post_data["data"]["comments"] = "0"
+                    
+                    try:
+                        # Reposts count
+                        reposts_elem = driver.find_element(By.CSS_SELECTOR, "[aria-label*='repost']")
+                        reposts_text = reposts_elem.text
+                        post_data["data"]["reposts"] = reposts_text.split()[0] if reposts_text else "0"
+                    except:
+                        post_data["data"]["reposts"] = "0"
+                    
+                    try:
+                        # Extract images
+                        image_elems = driver.find_elements(By.CSS_SELECTOR, ".feed-shared-image__container img, .feed-shared-image img")
+                        images = []
+                        for img in image_elems:
+                            src = img.get_attribute("src")
+                            if src and 'media.licdn.com' in src:
+                                images.append(src)
+                        post_data["data"]["images"] = images[:5]  # Limit to 5 images
+                    except:
+                        post_data["data"]["images"] = []
+                    
+                    try:
+                        # Extract video if present
+                        video_elem = driver.find_element(By.CSS_SELECTOR, "video")
+                        post_data["data"]["has_video"] = True
+                    except:
+                        post_data["data"]["has_video"] = False
+                    
+                    try:
+                        # Extract document/article if present
+                        article_elem = driver.find_element(By.CSS_SELECTOR, ".feed-shared-article, .feed-shared-external-article")
+                        article_title = article_elem.find_element(By.CSS_SELECTOR, ".feed-shared-article__title").text
+                        post_data["data"]["article_title"] = article_title
+                    except:
+                        post_data["data"]["article_title"] = None
+                    
+                    return post_data
+                    
+                finally:
+                    driver.quit()
+                    
+            except ImportError:
+                return {
+                    "status": "error",
+                    "message": "linkedin-scraper not installed. Install with: pip install linkedin-scraper",
+                    "note": "Selenium and ChromeDriver are also required"
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to read post: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Failed to read post: {str(e)}",
+                "url": post_url
+            }
+

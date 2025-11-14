@@ -118,7 +118,7 @@ class TestConstants:
 
     def test_api_version(self):
         """Test API version handling."""
-        api_version = os.getenv("LINKEDIN_API_VERSION", "202405")
+        api_version = os.getenv("LINKEDIN_API_VERSION", "202510")
         assert isinstance(api_version, str)
         assert len(api_version) == 6  # YYYYMM format
         print(f"✅ API version: {api_version}")
