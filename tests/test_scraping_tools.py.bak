@@ -1,0 +1,145 @@
+"""
+Tests for LinkedIn scraping tools (browser-based).
+
+These tests require a valid LINKEDIN_COOKIE environment variable.
+"""
+
+import pytest
+from linkedin_mcp_server.tools.person import get_person_profile, close_session
+from linkedin_mcp_server.tools.company import get_company_profile
+from linkedin_mcp_server.tools.job import (
+    get_job_details,
+    search_jobs,
+    search_recommended_jobs,
+)
+
+
+class TestPersonProfile:
+    """Tests for person profile scraping."""
+
+    def test_get_person_profile_success(self, linkedin_cookie, test_profile_url):
+        """Test successful profile retrieval."""
+        result = get_person_profile(test_profile_url)
+        
+        assert result is not None
+        assert "name" in result
+        assert isinstance(result, dict)
+        print(f"✅ Retrieved profile: {result.get('name')}")
+
+    def test_get_person_profile_invalid_url(self, linkedin_cookie):
+        """Test handling of invalid profile URL."""
+        with pytest.raises(Exception):
+            get_person_profile("https://www.linkedin.com/in/nonexistent-user-12345678")
+
+    def test_get_person_profile_malformed_url(self, linkedin_cookie):
+        """Test handling of malformed URL."""
+        with pytest.raises(Exception):
+            get_person_profile("not-a-valid-url")
+
+
+class TestCompanyProfile:
+    """Tests for company profile scraping."""
+
+    def test_get_company_profile_success(self, linkedin_cookie, test_company_url):
+        """Test successful company profile retrieval."""
+        result = get_company_profile(test_company_url)
+        
+        assert result is not None
+        assert "name" in result
+        assert isinstance(result, dict)
+        print(f"✅ Retrieved company: {result.get('name')}")
+
+    def test_get_company_profile_invalid_url(self, linkedin_cookie):
+        """Test handling of invalid company URL."""
+        with pytest.raises(Exception):
+            get_company_profile("https://www.linkedin.com/company/nonexistent-company-xyz")
+
+
+class TestJobTools:
+    """Tests for job-related tools."""
+
+    def test_search_jobs_basic(self, linkedin_cookie, test_job_keywords):
+        """Test basic job search."""
+        result = search_jobs(keywords=test_job_keywords, limit=5)
+        
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "jobs" in result or "total_results" in result
+        print(f"✅ Found jobs for '{test_job_keywords}'")
+
+    def test_search_jobs_with_location(self, linkedin_cookie):
+        """Test job search with location filter."""
+        result = search_jobs(
+            keywords="software engineer",
+            location="San Francisco, CA",
+            limit=3
+        )
+        
+        assert result is not None
+        print(f"✅ Found jobs in San Francisco")
+
+    def test_search_jobs_remote(self, linkedin_cookie):
+        """Test job search for remote positions."""
+        result = search_jobs(
+            keywords="python developer",
+            remote=True,
+            limit=5
+        )
+        
+        assert result is not None
+        print(f"✅ Found remote jobs")
+
+    def test_search_recommended_jobs(self, linkedin_cookie):
+        """Test personalized job recommendations."""
+        result = search_recommended_jobs(limit=5)
+        
+        assert result is not None
+        print(f"✅ Retrieved job recommendations")
+
+    @pytest.mark.skip(reason="Requires valid job URL which may expire")
+    def test_get_job_details(self, linkedin_cookie):
+        """Test getting job details."""
+        # Note: This test is skipped by default as job URLs expire
+        # To run, provide a valid current job URL
+        job_url = "https://www.linkedin.com/jobs/view/1234567890"
+        result = get_job_details(job_url)
+        
+        assert result is not None
+        assert "title" in result
+
+
+class TestSessionManagement:
+    """Tests for browser session management."""
+
+    def test_close_session(self, linkedin_cookie):
+        """Test closing browser session."""
+        # First perform an action to create a session
+        get_person_profile("https://www.linkedin.com/in/williamhgates")
+        
+        # Then close the session
+        result = close_session()
+        
+        assert result is not None
+        print(f"✅ Session closed successfully")
+
+
+class TestEdgeCases:
+    """Tests for edge cases and error handling."""
+
+    def test_empty_search_keywords(self, linkedin_cookie):
+        """Test job search with empty keywords."""
+        result = search_jobs(keywords="", limit=1)
+        # Should still return results or handle gracefully
+        assert result is not None
+
+    def test_invalid_limit(self, linkedin_cookie):
+        """Test job search with invalid limit."""
+        # Should handle or cap at maximum
+        result = search_jobs(keywords="python", limit=1000)
+        assert result is not None
+
+    def test_special_characters_in_search(self, linkedin_cookie):
+        """Test job search with special characters."""
+        result = search_jobs(keywords="C++ developer", limit=3)
+        assert result is not None
+        print(f"✅ Handled special characters in search")

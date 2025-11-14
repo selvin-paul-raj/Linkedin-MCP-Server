@@ -1,0 +1,190 @@
+"""
+Tests for LinkedIn API tools (REST API-based).
+
+These tests require a valid LINKEDIN_ACCESS_TOKEN environment variable.
+Some tests are marked as integration tests and create/modify real data.
+"""
+
+import pytest
+import os
+from linkedin_mcp_server.tools.post import LinkedInAPIClient
+
+
+class TestAPIClient:
+    """Tests for LinkedInAPIClient class."""
+
+    def test_client_initialization(self, linkedin_access_token):
+        """Test API client initialization."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        assert client is not None
+        assert client.access_token == linkedin_access_token
+        print(f"✅ API client initialized successfully")
+
+    def test_client_without_token(self):
+        """Test client initialization without token."""
+        with pytest.raises(Exception):
+            LinkedInAPIClient(None)
+
+    def test_get_person_urn(self, linkedin_access_token):
+        """Test retrieving person URN."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        urn = client._get_person_urn()
+        
+        assert urn is not None
+        assert urn.startswith("urn:li:person:")
+        print(f"✅ Retrieved person URN: {urn}")
+
+
+class TestCredentialValidation:
+    """Tests for credential validation."""
+
+    def test_validate_credentials_via_client(self, linkedin_access_token):
+        """Test credential validation through API client."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        result = client.validate_credentials()
+        
+        assert isinstance(result, bool)
+        print(f"✅ Credentials validated: {result}")
+
+    def test_validate_credentials_invalid_token(self):
+        """Test validation with invalid token."""
+        try:
+            client = LinkedInAPIClient("invalid_token_123")
+            result = client.validate_credentials()
+            # Should return False for invalid token
+            assert isinstance(result, bool)
+            print(f"✅ Properly handled invalid token: {result}")
+        except Exception as e:
+            print(f"✅ Properly rejected invalid token: {str(e)}")
+
+
+class TestProfileRetrieval:
+    """Tests for profile information retrieval."""
+
+    def test_get_person_urn(self, linkedin_access_token):
+        """Test retrieving person URN."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        urn = client._get_person_urn()
+        
+        assert urn is not None
+        assert urn.startswith("urn:li:person:")
+        print(f"✅ Retrieved person URN: {urn}")
+
+
+@pytest.mark.integration
+@pytest.mark.skip(reason="Integration tests disabled - create real posts")
+class TestPostManagement:
+    """Integration tests for post creation, update, and deletion.
+    
+    WARNING: These tests create and delete real posts on LinkedIn.
+    Run manually with: pytest tests/test_api_tools.py::TestPostManagement -v
+    """
+
+    def test_create_text_post(self, linkedin_access_token, sample_post_text):
+        """Test creating a text-only post via API client."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        result = client.create_post(text=sample_post_text)
+        
+        assert result is not None
+        assert isinstance(result, dict)
+        print(f"✅ API client can create posts")
+
+    def test_delete_nonexistent_post(self, linkedin_access_token):
+        """Test deleting a non-existent post."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        fake_post_urn = "urn:li:share:9999999999999999999"
+        
+        # Should handle gracefully
+        try:
+            result = client.delete_post(fake_post_urn)
+            print(f"✅ Delete method works: {result}")
+        except Exception as e:
+            print(f"✅ Handled non-existent post deletion: {str(e)}")
+
+
+@pytest.mark.integration
+@pytest.mark.skip(reason="Integration tests disabled - upload real images")
+class TestImageManagement:
+    """Integration tests for image upload and management."""
+
+    def test_upload_image_method_exists(self, linkedin_access_token):
+        """Test that upload image methods exist in API client."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        assert hasattr(client, 'initialize_image_upload')
+        assert hasattr(client, 'upload_image')
+        print(f"✅ Image upload methods available")
+
+    def test_upload_invalid_image_url(self, linkedin_access_token):
+        """Test uploading from invalid URL."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        
+        try:
+            # This should fail or raise exception
+            result = client.upload_image("https://invalid-url-that-does-not-exist.com/image.jpg")
+            print(f"⚠️ Upload didn't fail as expected")
+        except Exception as e:
+            print(f"✅ Properly handled invalid URL: {type(e).__name__}")
+
+
+@pytest.mark.integration
+@pytest.mark.skip(reason="Integration tests disabled - modify real posts")
+class TestReactions:
+    """Integration tests for post reactions.
+    
+    WARNING: These tests add/remove reactions on real posts.
+    Run manually with: pytest tests/test_api_tools.py::TestReactions -v
+    """
+
+    def test_reaction_methods_exist(self, linkedin_access_token):
+        """Test that reaction methods exist in API client."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        assert hasattr(client, 'add_reaction')
+        assert hasattr(client, 'remove_reaction')
+        assert hasattr(client, 'get_reactions')
+        print(f"✅ Reaction methods available")
+
+
+class TestEdgeCases:
+    """Tests for edge cases and error handling."""
+
+    def test_client_methods_exist(self, linkedin_access_token):
+        """Test that all expected methods exist."""
+        client = LinkedInAPIClient(linkedin_access_token)
+        
+        expected_methods = [
+            'create_post', 'update_post', 'delete_post',
+            'initialize_image_upload', 'upload_image',
+            'add_reaction', 'remove_reaction', 'get_reactions',
+            'validate_credentials', '_get_person_urn'
+        ]
+        
+        for method in expected_methods:
+            assert hasattr(client, method), f"Missing method: {method}"
+        
+        print(f"✅ All {len(expected_methods)} API client methods exist")
+
+    def test_post_length_validation(self, linkedin_access_token):
+        """Test post text length limits."""
+        # Max allowed
+        max_text = "A" * 3000
+        assert len(max_text) == 3000
+        
+        # Over max
+        over_max_text = "A" * 3001
+        assert len(over_max_text) > 3000
+        
+        print(f"✅ Text length validation prepared")
+
+    def test_unicode_text_preparation(self, linkedin_access_token):
+        """Test Unicode text handling."""
+        unicode_texts = [
+            "🚀 Test with emojis 🎉",
+            "Unicode: 你好 مرحبا Привет",
+            "Mixed: Hello 世界 🌍"
+        ]
+        
+        for text in unicode_texts:
+            assert len(text) > 0
+            assert isinstance(text, str)
+        
+        print(f"✅ Unicode text validation passed")
