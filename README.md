@@ -1,9 +1,3 @@
-Here is the **clean, professional, fully-fixed README.md** in **pure markdown code block** so you can copy–paste directly into GitHub with zero edits.
-
----
-
-# ✅ **COPY-PASTE READY `README.md`**
-
 
 # LinkedIn MCP Server
 
@@ -39,7 +33,7 @@ Complete LinkedIn automation toolkit. Scrape profiles, manage posts, read any Li
 `linkedin-mcp` is a fully featured MCP server that provides automation tools for LinkedIn.  
 It supports browser-based scraping and API-based operations for content management, media uploads, and reactions.
 
-Repository: **https://github.com/selvin-paul-raj/Linkedin-MCP-Server**
+Repository: **[Linkedin MCP Server](https://github.com/selvin-paul-raj/Linkedin-MCP-Server)**
 
 ---
 
